@@ -143,8 +143,13 @@ The LLM is now the bottleneck. Roughly in order of payoff:
     CUDA provider) and about 1–2GB of VRAM. With local Gemma loaded the stack
     already uses ~20.8 of 24.5GB.
 
-### 5. Housekeeping
+### 5. Housekeeping — DONE (2026-11-17)
 
 - Pipecat 1.6 deprecations: `PipelineTask` → `PipelineWorker`,
-  `PipelineRunner` → `WorkerRunner`. These will break at Pipecat 2.0.
-- The project isn't under git. Initialize a repository before the next large change.
+  `PipelineRunner` → `WorkerRunner` (worker registered with `add_workers()`),
+  and FastAPI `on_event("startup")` → a lifespan handler that also closes the
+  engines (Parakeet child process) on shutdown. Our code no longer triggers
+  deprecation warnings. The ones left come from Pipecat's own imports
+  (`audioop`, `AudioContextTTSService`, `SpeechTimeoutUserTurnStopStrategy`)
+  and torch.
+- The project is now a git repository (initial commit `41e6301`).
