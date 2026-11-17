@@ -1,0 +1,44 @@
+[project]
+name = "parla-voice"
+version = "0.1.0"
+description = "Parla local voice worker: VAD + STT + LLM + TTS pipeline"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.10",
+    "loguru>=0.7",
+    "pipecat-ai[websocket,anthropic]>=1.6.0",
+    "sherpa-onnx>=1.12",
+    "kokoro==0.9.4",
+    "torch>=2.6",
+    "soundfile>=0.13",
+    "openai>=1.74",
+    "httpx>=0.28",
+    "sherpa-onnx-core==1.13.4",
+    "claude-agent-sdk>=0.2.128",
+    "ormsgpack>=1.12.2",
+    "en-core-web-sm",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu126" }]
+en-core-web-sm = { url = "https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
+
+[project.scripts]
+parla-voice = "parla_voice.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/parla_voice"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.25", "httpx>=0.28"]

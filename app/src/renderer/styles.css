@@ -1,0 +1,71 @@
+@import 'tailwindcss';
+
+/* Warm editorial theme: cream canvas, ink type, ember (terracotta) accent.
+   Serif display for headings, sans for UI chrome. */
+@theme {
+  --color-cream: #f4f1ea;
+  --color-cream-deep: #ece7dc;
+  --color-parchment: #faf8f3;
+  --color-ink: #2b2a26;
+  --color-ink-soft: #6b675e;
+  --color-ink-faint: #a09a8c;
+  --color-ember: #bf5f3d;
+  --color-ember-deep: #a04a2c;
+  --color-bubble-user: #f0e8d8;
+  --color-bubble-ai: #efece5;
+
+  --font-display: Georgia, 'Iowan Old Style', 'Times New Roman', serif;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #f4f1ea;
+  color: #2b2a26;
+  font-family:
+    'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(43, 42, 38, 0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(43, 42, 38, 0.3);
+}
+
+/* D-style translucent card (history entries, floating panels). */
+.card-glass {
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(43, 42, 38, 0.07);
+  box-shadow: 0 1px 2px rgba(43, 42, 38, 0.04);
+  backdrop-filter: blur(8px);
+}
+.card-glass:hover {
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(43, 42, 38, 0.12);
+}
+
+/* Soft halo behind the orb. */
+.orb-halo {
+  background: radial-gradient(
+    circle,
+    rgba(207, 108, 70, 0.3) 0%,
+    rgba(228, 150, 90, 0.14) 45%,
+    transparent 70%
+  );
+  filter: blur(24px);
+}
