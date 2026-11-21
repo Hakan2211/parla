@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import SphereCanvas from '@/sphere/SphereCanvas'
 import { selectSphereState, useParlaStore } from '@/state/store'
 import { Bubble, timeLabel } from './Bubbles'
 import LatencyHUD from './LatencyHUD'
+import ModelSwitch from './ModelSwitch'
+import OrbStage from './OrbStage'
 import PersonaPicker from './PersonaPicker'
+import { DiamondRule, Icon } from './ui'
 import { CostPill } from './Usage'
 
 const STATE_LABEL = {
@@ -19,54 +21,50 @@ function todayLabel(): string {
     .toUpperCase()
 }
 
-function ElapsedTimer(): React.JSX.Element {
-  const [elapsed, setElapsed] = useState(0)
+function useElapsed(): string {
+  const startedAt = useParlaStore((s) => s.sessionStartedAt)
+  const [, tick] = useState(0)
   useEffect(() => {
-    const start = Date.now()
-    const t = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000)
+    if (!startedAt) return
+    const t = setInterval(() => tick((n) => n + 1), 1000)
     return () => clearInterval(t)
-  }, [])
-  const mm = String(Math.floor(elapsed / 60)).padStart(2, '0')
-  const ss = String(elapsed % 60).padStart(2, '0')
-  return (
-    <span className="font-mono text-sm text-ink-soft tabular-nums">
-      {mm}:{ss}
-    </span>
-  )
+  }, [startedAt])
+  const s = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 }
 
-const BAR_COUNT = 28
+const BAR_COUNT = 30
 
+/** Live mic/bot waveform: bars driven by level, animated off rAF. */
 function Waveform(): React.JSX.Element {
-  const micLevel = useParlaStore((s) => s.micLevel)
-  const botLevel = useParlaStore((s) => s.botLevel)
-  const level = Math.min(Math.max(micLevel * 5, botLevel * 4), 1)
-  const phases = useRef(Array.from({ length: BAR_COUNT }, () => Math.random() * Math.PI * 2))
-
-  const t = Date.now() / 300
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const phases = Array.from({ length: BAR_COUNT }, () => Math.random() * Math.PI * 2)
+    let raf = 0
+    let level = 0
+    const frame = (): void => {
+      const s = useParlaStore.getState()
+      const target = Math.min(Math.max(s.micLevel * 5, s.botLevel * 4), 1)
+      level += (target - level) * 0.25
+      const t = performance.now() / 260
+      const bars = ref.current?.children
+      if (bars) {
+        for (let i = 0; i < bars.length; i++) {
+          const wave = 0.35 + 0.65 * Math.abs(Math.sin(t + phases[i] + i * 0.5))
+          ;(bars[i] as HTMLElement).style.height = `${3 + level * wave * 22}px`
+        }
+      }
+      raf = requestAnimationFrame(frame)
+    }
+    raf = requestAnimationFrame(frame)
+    return () => cancelAnimationFrame(raf)
+  }, [])
   return (
-    <div className="flex h-6 items-center gap-[3px]">
-      {phases.current.map((phase, i) => {
-        const wave = 0.35 + 0.65 * Math.abs(Math.sin(t + phase + i * 0.6))
-        const h = 3 + level * wave * 20
-        return (
-          <span
-            key={i}
-            className="w-[2px] rounded-full bg-ember/70 transition-[height] duration-100"
-            style={{ height: `${h}px` }}
-          />
-        )
-      })}
+    <div ref={ref} className="flex h-7 items-center gap-[3px]" aria-hidden>
+      {Array.from({ length: BAR_COUNT }, (_, i) => (
+        <span key={i} className="block w-[2px] rounded-full bg-ember/80" style={{ height: 3 }} />
+      ))}
     </div>
-  )
-}
-
-function MicIcon(): React.JSX.Element {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-      <rect x="9" y="2" width="6" height="12" rx="3" />
-      <path d="M5 10a7 7 0 0014 0M12 19v3" />
-    </svg>
   )
 }
 
@@ -83,11 +81,26 @@ export default function SessionView(): React.JSX.Element {
   const activePersonaId = useParlaStore((s) => s.activePersonaId)
   const sessionUsage = useParlaStore((s) => s.sessionUsage)
   const progress = useParlaStore((s) => s.sessionProgress)
-
   const sphereState = useParlaStore(selectSphereState)
+  const elapsed = useElapsed()
+
   const persona = personas.find((p) => p.id === activePersonaId) ?? personas[0]
   const personaName = persona?.name ?? 'Parla'
   const connected = connection === 'connected'
+
+  // Space starts a conversation from the idle screen.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code !== 'Space' || e.repeat) return
+      const el = e.target as HTMLElement
+      if (el.closest('input, textarea, select, button, [contenteditable]')) return
+      if (useParlaStore.getState().connection !== 'disconnected' || !voiceReady) return
+      e.preventDefault()
+      void startSession()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [voiceReady, startSession])
 
   const scrollRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -97,121 +110,129 @@ export default function SessionView(): React.JSX.Element {
   return (
     <div className="relative flex h-full">
       {/* center stage */}
-      <div className="flex min-w-0 flex-1 flex-col items-center overflow-hidden px-8 pt-10 pb-8">
-        <p className="mb-2 text-[11px] font-semibold tracking-[0.3em] text-ink-faint">
-          {todayLabel()}
-        </p>
-        <h1 className="font-display text-[42px] leading-tight text-ink">
+      <div className="relative flex min-w-0 flex-1 flex-col items-center overflow-hidden px-8 pt-12 pb-8">
+        {connected ? (
+          <p className="eyebrow mb-2 !text-ember">LIVE · {elapsed}</p>
+        ) : (
+          <p className="eyebrow mb-2">{todayLabel()}</p>
+        )}
+        <h1 className="font-display text-center text-[52px] leading-[1.05] text-ink">
           {connected ? `Talking with ${personaName}` : 'A quiet moment'}
         </h1>
-        <div className="mt-3 mb-1 flex w-64 items-center gap-3">
-          <span className="h-px flex-1 bg-ink/10" />
-          <span className="text-ember/60">◆</span>
-          <span className="h-px flex-1 bg-ink/10" />
-        </div>
-        <p className="font-display text-sm text-ink-soft italic">
-          {connected
-            ? 'Speak freely — pause whenever you need to.'
-            : 'Take a breath, then start when you’re ready.'}
-        </p>
+        {!connected && (
+          <>
+            <DiamondRule className="mt-5 mb-4 w-80" />
+            <p className="font-display text-[18px] text-ink-soft italic">
+              Take a breath, then start when you’re ready.
+            </p>
+          </>
+        )}
 
-        {/* orb */}
-        <div className="relative min-h-0 w-full flex-1">
-          <div className="orb-halo absolute top-1/2 left-1/2 h-[420px] w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-full" />
-          <SphereCanvas />
-          <div className="pointer-events-none absolute bottom-1 left-1/2 -translate-x-1/2 text-[11px] tracking-[0.3em] text-ink-faint uppercase">
+        <div className="relative min-h-[240px] w-full flex-1">
+          <OrbStage />
+          <div className="pointer-events-none absolute bottom-0 left-1/2 -translate-x-1/2 text-[12px] font-medium tracking-[0.32em] text-ember uppercase">
             {connection === 'connecting' ? 'Connecting' : connected ? STATE_LABEL[sphereState] : ''}
           </div>
         </div>
 
-        {/* controls */}
         {connected ? (
-          <div className="mt-4 flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-ember text-white shadow-md shadow-ember/30">
-              <MicIcon />
+          <div className="card-glass mt-6 flex items-center gap-5 rounded-full py-2 pr-2 pl-2">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-ember-deep text-white">
+              <Icon name="mic" size={20} strokeWidth={1.8} />
             </div>
-            <div className="card-glass flex items-center gap-4 rounded-full px-5 py-2.5">
-              <Waveform />
-              <ElapsedTimer />
-              <span className="h-4 w-px bg-ink/10" />
-              <CostPill usage={sessionUsage} />
-            </div>
+            <Waveform />
+            <span className="font-mono text-[15px] text-ink tabular-nums">{elapsed}</span>
+            <span className="h-7 w-px bg-ink/12" />
+            <CostPill usage={sessionUsage} />
             <button
               onClick={() => void endSession()}
-              title="End session"
-              className="flex h-11 w-11 items-center justify-center rounded-full border border-ink/15 bg-white/60 text-ink-soft transition hover:border-red-300 hover:text-red-500"
+              title="End conversation"
+              aria-label="End conversation"
+              className="ml-1 flex h-12 w-12 items-center justify-center rounded-full border-[1.5px] border-ember/70 text-ember transition hover:bg-ember hover:text-white"
             >
-              <span className="block h-3.5 w-3.5 rounded-[3px] bg-current" />
+              <span className="block h-3.5 w-3.5 rounded-[2px] bg-current" />
             </button>
           </div>
         ) : (
-          <div className="mt-4 flex flex-col items-center gap-4">
+          <div className="mt-6 flex flex-col items-center gap-5">
             <PersonaPicker />
+            <ModelSwitch />
             <button
               onClick={() => void startSession()}
               disabled={!voiceReady || connection === 'connecting'}
-              className="flex items-center gap-3 rounded-full bg-ember px-8 py-3 text-sm font-medium text-white shadow-lg shadow-ember/25 transition hover:bg-ember-deep disabled:opacity-40"
+              className="btn-primary px-12 py-3.5 text-[19px] font-display"
             >
-              <MicIcon />
+              <Icon name="mic" size={20} />
               {connection === 'connecting' ? 'Connecting…' : 'Start talking'}
             </button>
-            {connection === 'connecting' && progress && (
-              <p className="font-display text-xs text-ink-soft italic">{progress}</p>
-            )}
+            <p className="-mt-1 text-[13px] text-ink-soft">
+              {connection === 'connecting' && progress ? (
+                <span className="font-display italic">{progress}</span>
+              ) : (
+                'Press Space to talk'
+              )}
+            </p>
+          </div>
+        )}
+
+        <LatencyHUD />
+
+        {notice && connected && (
+          <div className="absolute top-5 left-1/2 -translate-x-1/2 rounded-full border border-ink/10 bg-white/80 px-4 py-1.5 text-xs text-ink-soft">
+            {notice}
+          </div>
+        )}
+        {warning !== null && connected && (
+          <div className="absolute bottom-28 left-1/2 -translate-x-1/2 rounded-full border border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-800">
+            Session ends in {warning}s
+          </div>
+        )}
+        {error && (
+          <div className="absolute bottom-28 left-1/2 max-w-md -translate-x-1/2 rounded-2xl border border-red-200 bg-red-50 px-4 py-2 text-center text-xs text-red-700">
+            {error}
           </div>
         )}
       </div>
 
       {/* conversation panel */}
-      <aside className="flex w-[360px] flex-shrink-0 flex-col border-l border-ink/8 bg-parchment/60">
-        <header className="flex items-center justify-between border-b border-ink/8 px-5 py-4">
-          <h2 className="font-display text-lg text-ink">Conversation</h2>
-          {connected && (
-            <span className="flex items-center gap-1.5 text-[11px] text-ink-faint">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
-              live
-            </span>
-          )}
-        </header>
-        <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {messages.length === 0 && (
-            <p className="mt-8 text-center font-display text-sm text-ink-faint italic">
-              Your conversation will appear here.
-            </p>
-          )}
-          {messages.map((m) => (
-            <Bubble
-              key={m.id}
-              role={m.role}
-              speaker={m.role === 'user' ? 'You' : personaName}
-              time={timeLabel(m.at)}
-            >
-              {m.text}
-              {m.interrupted && (
-                <span className="ml-1 text-xs text-ink-faint italic">— interrupted</span>
+      <aside className="my-3 mr-3 flex w-[360px] flex-shrink-0 flex-col rounded-[22px] border border-ink/6 bg-parchment/70">
+        {connected || messages.length > 0 ? (
+          <>
+            <header className="flex items-center gap-3 px-6 pt-6 pb-4">
+              <h2 className="font-display text-[26px] text-ink">Conversation</h2>
+              {connected && (
+                <span className="flex items-center gap-1.5 font-mono text-[11px] text-ink-soft">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-600" />
+                  live
+                </span>
               )}
-            </Bubble>
-          ))}
-        </div>
+            </header>
+            <div className="mx-6 h-px bg-ink/8" />
+            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+              {messages.map((m) => (
+                <Bubble
+                  key={m.id}
+                  role={m.role}
+                  speaker={m.role === 'user' ? 'You' : personaName}
+                  time={timeLabel(m.at)}
+                  streaming={m.pending}
+                >
+                  {m.text}
+                  {m.interrupted && <span className="ml-1 text-sm text-ink-faint italic">— interrupted</span>}
+                </Bubble>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center px-10 text-center">
+            <Icon name="chat" size={34} className="mb-4 text-ink-soft" strokeWidth={1.3} />
+            <h2 className="font-display text-[22px] text-ink">No conversation yet</h2>
+            <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-soft">
+              Start talking to begin a conversation with {personaName}.
+            </p>
+          </div>
+        )}
       </aside>
-
-      {/* banners */}
-      {notice && connected && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 rounded-full border border-sky-200 bg-sky-50 px-4 py-1.5 text-xs text-sky-700">
-          {notice}
-        </div>
-      )}
-      {warning !== null && connected && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 rounded-full border border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-700">
-          Session ends in {warning}s
-        </div>
-      )}
-      {error && (
-        <div className="absolute bottom-24 left-1/2 max-w-md -translate-x-1/2 rounded-full border border-red-200 bg-red-50 px-4 py-1.5 text-xs text-red-600">
-          {error}
-        </div>
-      )}
-      <LatencyHUD />
     </div>
   )
 }

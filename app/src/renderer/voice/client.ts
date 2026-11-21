@@ -20,6 +20,22 @@ export interface VoiceSessionCallbacks {
   onError: (message: string) => void
 }
 
+const MIC_PROCESSING = { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+
+/** Open the chosen mic; fall back to the system default if it was unplugged. */
+export async function openMic(deviceId: string): Promise<MediaStream> {
+  if (deviceId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { ...MIC_PROCESSING, deviceId: { exact: deviceId } }
+      })
+    } catch (e) {
+      if (!(e instanceof DOMException && (e.name === 'OverconstrainedError' || e.name === 'NotFoundError'))) throw e
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: MIC_PROCESSING })
+}
+
 export class VoiceSession {
   private ws: WebSocket | null = null
   private captureCtx: AudioContext | null = null
@@ -30,7 +46,8 @@ export class VoiceSession {
   private botLevel = 0
   private closing = false
 
-  async connect(wsUrl: string, callbacks: VoiceSessionCallbacks): Promise<void> {
+  /** `inputDeviceId` empty = the Windows default recording device. */
+  async connect(wsUrl: string, callbacks: VoiceSessionCallbacks, inputDeviceId = ''): Promise<void> {
     this.closing = false
     callbacks.onConnectionState('connecting')
 
@@ -49,9 +66,7 @@ export class VoiceSession {
     this.playbackNode = playbackNode
 
     // --- capture path (mic @ 16kHz) ---
-    const micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-    })
+    const micStream = await openMic(inputDeviceId)
     this.micStream = micStream
     const captureCtx = new AudioContext({ sampleRate: 16000 })
     await captureCtx.audioWorklet.addModule(workletUrl(CAPTURE_WORKLET))

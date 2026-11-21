@@ -17,6 +17,9 @@ import type {
 const api = {
   voice: {
     status: (): Promise<VoiceServerStatus> => ipcRenderer.invoke('voice:status'),
+    restart: (): Promise<void> => ipcRenderer.invoke('voice:restart'),
+    preview: (voiceId: string, text?: string): Promise<Uint8Array> =>
+      ipcRenderer.invoke('voice:preview', voiceId, text),
     onStatusChanged: (fn: (s: VoiceServerStatus) => void): (() => void) => {
       const listener = (_e: Electron.IpcRendererEvent, s: VoiceServerStatus): void => fn(s)
       ipcRenderer.on('voice:status-changed', listener)
@@ -40,7 +43,12 @@ const api = {
   chats: {
     list: (): Promise<Chat[]> => ipcRenderer.invoke('chats:list'),
     get: (id: string): Promise<Chat | null> => ipcRenderer.invoke('chats:get', id),
-    delete: (id: string): Promise<void> => ipcRenderer.invoke('chats:delete', id)
+    delete: (id: string): Promise<void> => ipcRenderer.invoke('chats:delete', id),
+    onChanged: (fn: () => void): (() => void) => {
+      const listener = (): void => fn()
+      ipcRenderer.on('chats:changed', listener)
+      return () => ipcRenderer.removeListener('chats:changed', listener)
+    }
   },
   messages: {
     list: (chatId: string): Promise<Message[]> => ipcRenderer.invoke('messages:list', chatId),

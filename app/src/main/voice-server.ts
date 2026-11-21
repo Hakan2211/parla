@@ -67,12 +67,27 @@ export class VoiceServer {
     for (const port of PORT_RANGE) {
       if (await this.health(port)) {
         this.adopted = true
-        await this.waitForModels(port)
-        return
+        if (await this.waitForModels(port, { reportFailure: false })) return
+        // A server whose model load failed (or hung) never recovers: ask it
+        // to exit and start a fresh one instead of adopting it on every launch.
+        this.adopted = false
+        await this.requestShutdown(port)
+        break
       }
     }
 
-    const port = PORT_RANGE[0]
+    // First port with nothing answering (a wedged server may still hold one).
+    let port: number | null = null
+    for (const p of PORT_RANGE) {
+      if (!(await this.health(p, 800))) {
+        port = p
+        break
+      }
+    }
+    if (port === null) {
+      this.setStatus({ state: 'error', port: null, detail: 'no free port in 8790–8799' })
+      return
+    }
     const logDir = join(app.getPath('userData'), 'logs')
     mkdirSync(logDir, { recursive: true })
     const log = createWriteStream(join(logDir, 'voice-server.log'), { flags: 'a' })
@@ -113,22 +128,61 @@ export class VoiceServer {
   }
 
   /** The server answers /health immediately; models load in the background.
-   *  Stay in 'starting' (with detail) until both engines report loaded. */
-  private async waitForModels(port: number): Promise<void> {
+   *  Stay in 'starting' (with detail) until both engines report loaded.
+   *  Returns false on load failure / timeout. */
+  private async waitForModels(
+    port: number,
+    { reportFailure = true }: { reportFailure?: boolean } = {}
+  ): Promise<boolean> {
     const deadline = Date.now() + BOOT_TIMEOUT_MS
+    let models: { stt: boolean; tts: boolean } | undefined
+    let detail = 'models failed to load within 90s'
     while (Date.now() < deadline) {
       const body = await this.health(port)
       if (body) {
-        const models = body.models as { stt: boolean; tts: boolean }
+        models = body.models as { stt: boolean; tts: boolean }
         if (models.stt && models.tts) {
           this.setStatus({ state: 'ready', port, models })
-          return
+          return true
+        }
+        if (typeof body.load_error === 'string' && body.load_error) {
+          detail = `model load failed — ${body.load_error}`
+          break
         }
         this.setStatus({ state: 'starting', port, models, detail: 'loading models' })
       }
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
     }
-    this.setStatus({ state: 'error', port: null, detail: 'models failed to load within 90s' })
+    if (reportFailure) this.setStatus({ state: 'error', port: null, models, detail })
+    return false
+  }
+
+  private async requestShutdown(port: number): Promise<void> {
+    try {
+      await fetch(`http://127.0.0.1:${port}/shutdown`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(2000)
+      })
+    } catch {
+      // unreachable — nothing more we can do without its pid
+    }
+    for (let i = 0; i < 10 && (await this.health(port, 500)); i++) {
+      await new Promise((r) => setTimeout(r, 300))
+    }
+  }
+
+  /** Retry after a failed start: stop our child, shut down any server that
+   *  isn't fully loaded (it won't recover), then find-or-spawn again. */
+  async restart(): Promise<void> {
+    this.adopted = false
+    await this.stop()
+    this.child = null
+    for (const port of PORT_RANGE) {
+      const body = await this.health(port, 800)
+      const models = body?.models as { stt: boolean; tts: boolean } | undefined
+      if (body && !(models?.stt && models?.tts)) await this.requestShutdown(port)
+    }
+    await this.start()
   }
 
   async stop(): Promise<void> {

@@ -92,6 +92,13 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_usage_chat ON usage_events(chat_id);
   CREATE INDEX idx_usage_created ON usage_events(created_at);
+  `,
+  // 004 — muted builtin persona colors for the editorial theme. Only
+  // touches colors the user never changed (still the 002 seed values).
+  `
+  UPDATE personas SET color = '#d9825f' WHERE id = 'builtin-friend' AND color = '#7c5cff';
+  UPDATE personas SET color = '#8fa67f' WHERE id = 'builtin-coach' AND color = '#f59e0b';
+  UPDATE personas SET color = '#7f78b8' WHERE id = 'builtin-thinker' AND color = '#10b981';
   `
 ]
 

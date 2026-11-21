@@ -57,8 +57,22 @@ export function usageSummary(): UsageSummary {
     last7d: totals(Date.now() - 7 * day),
     last30d: totals(Date.now() - 30 * day),
     allTime: totals(0),
-    byModel: usageRepo.byModel()
+    byModel: usageRepo.byModel(),
+    daily: dailySeries(startOfToday - 29 * day)
   }
+}
+
+/** 30 consecutive local days, zero-filled, oldest first. */
+function dailySeries(since: number): { day: string; costUsd: number }[] {
+  const byDay = new Map(usageRepo.daily(since).map((r) => [r.day, r.costUsd]))
+  const out: { day: string; costUsd: number }[] = []
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(since)
+    d.setDate(d.getDate() + i)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    out.push({ day: key, costUsd: byDay.get(key) ?? 0 })
+  }
+  return out
 }
 
 /** Live balance/usage of the configured OpenRouter key (key never leaves main). */

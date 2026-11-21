@@ -62,6 +62,8 @@ interface ParlaState {
   sessionNotice: string | null
   /** Pre-connect progress, e.g. "Loading gemma… onto the GPU". */
   sessionProgress: string
+  /** When the live connection opened (for the elapsed timer). */
+  sessionStartedAt: number | null
 
   startSession: () => Promise<void>
   endSession: () => Promise<void>
@@ -121,6 +123,7 @@ export const useParlaStore = create<ParlaState>((set, get) => ({
   sessionWarning: null,
   sessionNotice: null,
   sessionProgress: '',
+  sessionStartedAt: null,
 
   startSession: async () => {
     if (get().connection !== 'disconnected') return
@@ -137,9 +140,11 @@ export const useParlaStore = create<ParlaState>((set, get) => ({
     try {
       const { chatId, wsUrl } = await window.parla.session.start(get().activePersonaId)
       set({ activeChatId: chatId })
+      const inputDeviceId = String((await window.parla.settings.all())['audio.inputDeviceId'] ?? '')
       await voiceSession.connect(wsUrl, {
         onConnectionState: (state) => {
           set({ connection: state === 'disconnected' ? 'disconnected' : state })
+          if (state === 'connected') set({ sessionStartedAt: Date.now() })
           if (state === 'disconnected') {
             set({ botSpeaking: false, userSpeaking: false, micLevel: 0, botLevel: 0 })
             void get().endSession()
@@ -233,7 +238,7 @@ export const useParlaStore = create<ParlaState>((set, get) => ({
         },
         onLevels: (mic, bot) => set({ micLevel: mic, botLevel: bot }),
         onError: (message) => set({ sessionError: message })
-      })
+      }, inputDeviceId)
     } catch (e) {
       set({
         connection: 'disconnected',
@@ -254,7 +259,12 @@ export const useParlaStore = create<ParlaState>((set, get) => ({
   endSession: async () => {
     const chatId = get().activeChatId
     await voiceSession.disconnect()
-    set({ connection: 'disconnected', botSpeaking: false, userSpeaking: false })
+    set({
+      connection: 'disconnected',
+      botSpeaking: false,
+      userSpeaking: false,
+      sessionStartedAt: null
+    })
     if (chatId) {
       set({ activeChatId: null })
       await window.parla.session.end(chatId)
@@ -275,6 +285,7 @@ if (typeof window !== 'undefined' && window.parla) {
   window.parla.voice.status().then((s) => useParlaStore.getState().setVoiceStatus(s))
   window.parla.voice.onStatusChanged((s) => useParlaStore.getState().setVoiceStatus(s))
   window.parla.session.onProgress((sessionProgress) => useParlaStore.setState({ sessionProgress }))
+  window.parla.chats.onChanged(() => void useParlaStore.getState().refreshChats())
   void useParlaStore.getState().refreshChats()
   void useParlaStore.getState().refreshPersonas()
 }

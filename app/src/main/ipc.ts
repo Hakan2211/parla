@@ -11,12 +11,27 @@ import type { VoiceServer } from './voice-server'
 
 export function registerIpc(voiceServer: VoiceServer): void {
   ipcMain.handle('voice:status', () => voiceServer.current)
+  ipcMain.handle('voice:restart', () => voiceServer.restart())
 
   ipcMain.handle('session:start', (e, personaId: string | null) =>
     startSession(voiceServer, personaId ?? null, (text) => {
       if (!e.sender.isDestroyed()) e.sender.send('session:progress', text)
     })
   )
+
+  // Short voice sample for the voice pickers (bytes → renderer plays a blob).
+  ipcMain.handle('voice:preview', async (_e, voiceId: string, text?: string) => {
+    const base = voiceServer.baseUrl
+    if (!base) throw new Error('Voice engine is not running')
+    const res = await fetch(`${base}/tts/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_id: voiceId, text }),
+      signal: AbortSignal.timeout(20_000)
+    })
+    if (!res.ok) throw new Error(`Voice preview failed (${res.status})`)
+    return new Uint8Array(await res.arrayBuffer())
+  })
 
   ipcMain.handle('local:status', () => localStatus())
   ipcMain.handle('local:load', async () => {

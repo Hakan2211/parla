@@ -32,11 +32,23 @@ def create_app() -> FastAPI:
     from parla_voice.engines import Engines
 
     engines = Engines()
+    load_error: dict[str, str] = {}
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         # Engines load in the background so /health answers immediately.
-        load_task = asyncio.create_task(engines.load())
+        # A failure must be loud: logged, and reported by /health so the app
+        # can restart us instead of waiting forever on models that never come.
+        async def load_engines() -> None:
+            try:
+                await engines.load()
+            except asyncio.CancelledError:
+                raise
+            except BaseException as e:
+                logger.exception("engine load failed")
+                load_error["detail"] = f"{type(e).__name__}: {e}"[:300]
+
+        load_task = asyncio.create_task(load_engines())
         try:
             yield
         finally:
@@ -62,6 +74,7 @@ def create_app() -> FastAPI:
             "status": "ok",
             "version": __version__,
             "models": app.state.model_status(),
+            "load_error": load_error.get("detail"),
             "active_sessions": len(active),
         }
 
@@ -133,6 +146,31 @@ def create_app() -> FastAPI:
             return {"ok": False, "detail": f"Anthropic API error {e.status_code}"}
         finally:
             await client.close()
+
+    @app.post("/tts/preview")
+    async def tts_preview(req: dict):
+        """Short Kokoro sample for the voice pickers. Returns a WAV file."""
+        import io
+        import wave
+
+        from fastapi import Response
+
+        voice = str(req.get("voice_id") or "af_heart")
+        text = str(req.get("text") or "Hi, I'm here whenever you want to talk.")[:300]
+        try:
+            tts = engines.tts_for("kokoro")
+        except AssertionError:
+            raise HTTPException(status_code=503, detail="voice engine still loading")
+        pcm = bytearray()
+        async for chunk in tts.synthesize(text, voice):
+            pcm.extend(chunk)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(tts.sample_rate)
+            w.writeframes(bytes(pcm))
+        return Response(content=buf.getvalue(), media_type="audio/wav")
 
     @app.post("/shutdown")
     async def shutdown():

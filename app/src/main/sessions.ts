@@ -3,6 +3,7 @@
 // On end: close the chat row and kick off memory extraction (M6).
 
 import { randomUUID } from 'crypto'
+import { BrowserWindow } from 'electron'
 import type { LLMProvider, MemoryKind, SessionStartResult, UsageDelta } from '@shared/types'
 import { buildContextBrief } from './brief'
 import { chatsRepo, memoryRepo, messagesRepo, personasRepo, settingsRepo } from './db/repos'
@@ -176,6 +177,13 @@ interface ExtractResponse {
   usage?: UsageDelta
 }
 
+/** Tell renderers a chat's title/summary changed (extraction finishes after the session ends). */
+function notifyChatsChanged(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('chats:changed')
+  }
+}
+
 export async function extractChat(voiceServer: VoiceServer, chatId: string): Promise<void> {
   const base = voiceServer.baseUrl
   const chat = chatsRepo.get(chatId)
@@ -222,6 +230,8 @@ export async function extractChat(voiceServer: VoiceServer, chatId: string): Pro
   } catch (e) {
     console.error('extraction failed for chat', chatId, e)
     chatsRepo.setExtraction(chatId, 'failed')
+  } finally {
+    notifyChatsChanged()
   }
 }
 

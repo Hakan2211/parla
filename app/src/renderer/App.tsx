@@ -5,6 +5,7 @@ import PersonaEditor from './components/PersonaEditor'
 import SessionView from './components/SessionView'
 import SettingsPage from './components/SettingsPage'
 import Sidebar from './components/Sidebar'
+import BootScreen from './components/BootScreen'
 import { useParlaStore } from './state/store'
 
 export default function App(): React.JSX.Element {
@@ -24,30 +25,7 @@ export default function App(): React.JSX.Element {
     }
   }, [status.state])
 
-  if (status.state !== 'ready') {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <h1 className="font-display mb-2 text-6xl text-ink">Parla</h1>
-          <p className="mb-8 text-[10px] font-semibold tracking-[0.35em] text-ink-faint uppercase">
-            Voice Companion
-          </p>
-          <div className="flex items-center justify-center gap-2 text-sm text-ink-soft">
-            <span
-              className={
-                'inline-block h-2.5 w-2.5 rounded-full ' +
-                (status.state === 'error' ? 'bg-red-500' : 'animate-pulse bg-ember')
-              }
-            />
-            <span>
-              {status.state === 'error' ? 'Voice engine failed' : 'Starting voice engine…'}
-            </span>
-          </div>
-          {status.detail && <p className="mt-2 text-xs text-ink-faint">{status.detail}</p>}
-        </div>
-      </div>
-    )
-  }
+  if (status.state !== 'ready') return <BootScreen />
 
   return (
     <div className="flex h-full">

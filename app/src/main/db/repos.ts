@@ -501,6 +501,17 @@ export const usageRepo = {
     return getDb().prepare(`${TOTALS_SQL} WHERE created_at >= ?`).get(since) as TotalsRow
   },
 
+  /** Cost per local calendar day since `since` (days with no usage omitted). */
+  daily(since: number): { day: string; costUsd: number }[] {
+    return getDb()
+      .prepare(
+        `SELECT strftime('%Y-%m-%d', created_at / 1000, 'unixepoch', 'localtime') day,
+           SUM(cost_usd) costUsd
+         FROM usage_events WHERE created_at >= ? GROUP BY day ORDER BY day`
+      )
+      .all(since) as { day: string; costUsd: number }[]
+  },
+
   byModel(): { provider: string; model: string; costUsd: number; tokens: number; sessions: number }[] {
     return getDb()
       .prepare(

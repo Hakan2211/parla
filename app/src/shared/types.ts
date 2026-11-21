@@ -120,6 +120,8 @@ export interface UsageSummary {
   last30d: UsageTotals
   allTime: UsageTotals
   byModel: { provider: string; model: string; costUsd: number; tokens: number; sessions: number }[]
+  /** Last 30 local days, oldest first, zero-filled. `day` is YYYY-MM-DD. */
+  daily: { day: string; costUsd: number }[]
 }
 
 export interface OpenRouterKeyInfo {

@@ -7,13 +7,17 @@ import * as THREE from 'three'
 import { selectSphereState, useParlaStore } from '@/state/store'
 import { SPHERE_FRAGMENT, SPHERE_VERTEX } from './shaders'
 
-// Per-state targets: displacement amplitude, noise frequency, speed, rim glow.
+// Per-state targets: wobble amplitude/frequency, flow speed, and the three
+// look blends the fragment shader mixes (see shaders.ts).
 const STATE_TARGETS = {
-  idle: { amp: 0.06, freq: 1.4, speed: 0.25, glow: 0.35, scale: 1.0 },
-  listening: { amp: 0.1, freq: 2.2, speed: 0.5, glow: 0.7, scale: 1.03 },
-  thinking: { amp: 0.16, freq: 4.5, speed: 1.6, glow: 0.55, scale: 0.97 },
-  speaking: { amp: 0.22, freq: 2.8, speed: 0.9, glow: 1.0, scale: 1.08 }
+  idle: { amp: 0.012, freq: 1.0, flow: 0.35, swirl: 0, warm: 0, cool: 0, scale: 1.0, breathe: 0.008 },
+  listening: { amp: 0.016, freq: 1.1, flow: 0.5, swirl: 0, warm: 0, cool: 1, scale: 1.02, breathe: 0.014 },
+  thinking: { amp: 0.012, freq: 1.0, flow: 0.85, swirl: 1, warm: 0, cool: 0, scale: 0.97, breathe: 0.004 },
+  speaking: { amp: 0.02, freq: 1.2, flow: 0.6, swirl: 0, warm: 1, cool: 0, scale: 1.04, breathe: 0 }
 } as const
+
+const REDUCED_MOTION =
+  typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t
@@ -26,30 +30,41 @@ function Blob(): React.JSX.Element {
       new THREE.ShaderMaterial({
         vertexShader: SPHERE_VERTEX,
         fragmentShader: SPHERE_FRAGMENT,
+        transparent: true,
+        toneMapped: false,
         uniforms: {
           uTime: { value: 0 },
+          uClock: { value: 0 },
           uLevel: { value: 0 },
           uAmp: { value: STATE_TARGETS.idle.amp },
           uFreq: { value: STATE_TARGETS.idle.freq },
-          uSpeed: { value: STATE_TARGETS.idle.speed },
-          uGlow: { value: STATE_TARGETS.idle.glow },
-          // Fixed warm ember — matches the app accent; persona colors stay
-          // on their small UI dots so the orb never clashes with the theme.
-          uColor: { value: new THREE.Color('#d97a4e') }
+          uSwirl: { value: 0 },
+          uWarm: { value: 0 },
+          uCool: { value: 0 }
         }
       }),
     []
   )
 
   const smoothLevel = useRef(0)
+  const flow = useRef<number>(STATE_TARGETS.idle.flow)
+  const breathe = useRef<number>(STATE_TARGETS.idle.breathe)
+  const baseScale = useRef(1)
 
   useFrame((_, delta) => {
     const state = useParlaStore.getState()
     const sphereState = selectSphereState(state)
     const target = STATE_TARGETS[sphereState]
     const u = material.uniforms
+    const motion = REDUCED_MOTION ? 0.25 : 1
 
-    u.uTime.value += delta
+    // Cross-fade state parameters.
+    const blend = 1 - Math.exp(-delta * 4)
+    flow.current = lerp(flow.current, target.flow, blend)
+    breathe.current = lerp(breathe.current, target.breathe, blend)
+    // Integrate flow so speed changes never make the liquid jump.
+    u.uTime.value += delta * flow.current * motion
+    u.uClock.value += delta * motion
 
     // Audio level: mic while listening, bot voice while speaking.
     const rawLevel =
@@ -60,29 +75,29 @@ function Blob(): React.JSX.Element {
           : 0
     const clamped = Math.min(rawLevel, 1)
     // fast attack, slow release — feels reactive without flicker
-    smoothLevel.current =
-      clamped > smoothLevel.current
-        ? lerp(smoothLevel.current, clamped, 1 - Math.exp(-delta * 30))
-        : lerp(smoothLevel.current, clamped, 1 - Math.exp(-delta * 6))
-    u.uLevel.value = smoothLevel.current
+    smoothLevel.current = lerp(
+      smoothLevel.current,
+      clamped,
+      1 - Math.exp(-delta * (clamped > smoothLevel.current ? 30 : 6))
+    )
+    u.uLevel.value = smoothLevel.current * motion
 
-    // Cross-fade state parameters.
-    const blend = 1 - Math.exp(-delta * 5)
     u.uAmp.value = lerp(u.uAmp.value, target.amp, blend)
     u.uFreq.value = lerp(u.uFreq.value, target.freq, blend)
-    u.uSpeed.value = lerp(u.uSpeed.value, target.speed, blend)
-    u.uGlow.value = lerp(u.uGlow.value, target.glow, blend)
+    u.uSwirl.value = lerp(u.uSwirl.value, target.swirl, blend)
+    u.uWarm.value = lerp(u.uWarm.value, target.warm, blend)
+    u.uCool.value = lerp(u.uCool.value, target.cool, blend)
 
     if (mesh.current) {
-      const s = lerp(mesh.current.scale.x, target.scale, blend)
-      mesh.current.scale.setScalar(s)
-      mesh.current.rotation.y += delta * 0.05
+      baseScale.current = lerp(baseScale.current, target.scale, blend)
+      const breath = Math.sin(u.uClock.value * 1.3) * breathe.current * motion
+      mesh.current.scale.setScalar(baseScale.current * (1 + breath))
     }
   })
 
   return (
     <mesh ref={mesh} material={material}>
-      <icosahedronGeometry args={[1, 48]} />
+      <icosahedronGeometry args={[1, 32]} />
     </mesh>
   )
 }
