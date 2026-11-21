@@ -4,6 +4,7 @@ import type {
   Chat,
   Message,
   Persona,
+  StudioProject,
   TurnMetrics,
   UsageTotals,
   VoiceServerStatus
@@ -46,6 +47,16 @@ interface ParlaState {
   activePersonaId: string | null
   setActivePersonaId: (id: string | null) => void
 
+  /** Studio projects for the start screen's picker (empty when Studio is off or closed). */
+  studioProjects: StudioProject[]
+  studioError: string | null
+  refreshStudioProjects: () => Promise<void>
+  /** The Studio project the next conversation is about. */
+  studioProjectId: string | null
+  setStudioProjectId: (id: string | null) => void
+  /** Apply what a launch asked for (`--studio-project`, `--open-chat`). */
+  applyLaunchIntent: () => Promise<void>
+
   connection: 'disconnected' | 'connecting' | 'connected'
   activeChatId: string | null
   botSpeaking: boolean
@@ -70,6 +81,14 @@ interface ParlaState {
 }
 
 const voiceSession = new VoiceSession()
+export const PRODUCER_ID = 'builtin-producer'
+
+function cleanError(e: unknown): string {
+  return (e instanceof Error ? e.message : String(e)).replace(
+    /^Error invoking remote method '[^']+': (Error: )?/,
+    ''
+  )
+}
 let liveAssistantId: string | null = null
 let messageCounter = 0
 
@@ -109,6 +128,40 @@ export const useParlaStore = create<ParlaState>((set, get) => ({
   activePersonaId: null,
   setActivePersonaId: (activePersonaId) => set({ activePersonaId }),
 
+  studioProjects: [],
+  studioError: null,
+  refreshStudioProjects: async () => {
+    try {
+      set({ studioProjects: await window.parla.studio.projects(), studioError: null })
+    } catch (e) {
+      set({ studioProjects: [], studioError: cleanError(e) })
+    }
+  },
+  studioProjectId: null,
+  setStudioProjectId: (studioProjectId) => set({ studioProjectId }),
+  applyLaunchIntent: async () => {
+    const intent = await window.parla.launch.take()
+    if (!intent) return
+    if (intent.studioProject) {
+      // Never pull the rug from under a live conversation.
+      if (get().connection !== 'disconnected') {
+        set({ sessionNotice: 'Studio asked for a new conversation: end this one first.' })
+        return
+      }
+      if (get().personas.length === 0) await get().refreshPersonas()
+      const producer = get().personas.find((p) => p.id === PRODUCER_ID)
+      set({
+        view: { kind: 'session' },
+        studioProjectId: intent.studioProject,
+        ...(producer ? { activePersonaId: producer.id } : {})
+      })
+      void get().refreshStudioProjects()
+    } else if (intent.openChat) {
+      if (get().chats.length === 0) await get().refreshChats()
+      if (get().chats.some((c) => c.id === intent.openChat)) await get().openChat(intent.openChat)
+    }
+  },
+
   connection: 'disconnected',
   activeChatId: null,
   botSpeaking: false,
@@ -138,8 +191,10 @@ export const useParlaStore = create<ParlaState>((set, get) => ({
       connection: 'connecting'
     })
     try {
-      const { chatId, wsUrl } = await window.parla.session.start(get().activePersonaId)
-      set({ activeChatId: chatId })
+      const { chatId, wsUrl, notice } = await window.parla.session.start(get().activePersonaId, {
+        studioProjectId: get().studioProjectId
+      })
+      set({ activeChatId: chatId, ...(notice ? { sessionNotice: notice } : {}) })
       const inputDeviceId = String((await window.parla.settings.all())['audio.inputDeviceId'] ?? '')
       await voiceSession.connect(wsUrl, {
         onConnectionState: (state) => {
@@ -243,10 +298,7 @@ export const useParlaStore = create<ParlaState>((set, get) => ({
       set({
         connection: 'disconnected',
         sessionProgress: '',
-        sessionError: (e instanceof Error ? e.message : String(e)).replace(
-          /^Error invoking remote method '[^']+': (Error: )?/,
-          ''
-        )
+        sessionError: cleanError(e)
       })
       const chatId = get().activeChatId
       if (chatId) {
@@ -288,4 +340,7 @@ if (typeof window !== 'undefined' && window.parla) {
   window.parla.chats.onChanged(() => void useParlaStore.getState().refreshChats())
   void useParlaStore.getState().refreshChats()
   void useParlaStore.getState().refreshPersonas()
+  void useParlaStore.getState().refreshStudioProjects()
+  void useParlaStore.getState().applyLaunchIntent()
+  window.parla.launch.onIntent(() => void useParlaStore.getState().applyLaunchIntent())
 }

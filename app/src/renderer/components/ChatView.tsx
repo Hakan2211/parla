@@ -1,5 +1,5 @@
 import { useParlaStore } from '@/state/store'
-import type { TurnMetrics } from '@shared/types'
+import type { Chat, TurnMetrics } from '@shared/types'
 import { timeLabel } from './Bubbles'
 import { Icon } from './ui'
 import { UsageStatsRow } from './Usage'
@@ -12,6 +12,39 @@ function MetricsBadge({ metrics }: { metrics: TurnMetrics }): React.JSX.Element 
     >
       {metrics.voiceToVoiceMs}ms
     </span>
+  )
+}
+
+/** Where this conversation's proposals are on their way to Studio's Inbox. */
+function StudioLine({ chat }: { chat: Chat }): React.JSX.Element | null {
+  const projects = useParlaStore((s) => s.studioProjects)
+  if (chat.studioStatus === 'none') return null
+  const project = projects.find((p) => p.id === chat.studioProjectId)
+  const about = chat.studioProjectId ? ` · about “${project?.title ?? 'a Studio project'}”` : ''
+  const text =
+    chat.studioStatus === 'pending'
+      ? chat.endedAt
+        ? 'Sending to Studio…'
+        : 'Goes to Studio when it ends'
+      : chat.studioStatus === 'done'
+        ? chat.studioSent > 0
+          ? `${chat.studioSent} proposal${chat.studioSent === 1 ? '' : 's'} in Studio’s Inbox`
+          : (chat.studioDetail ?? 'Nothing to propose')
+        : chat.studioStatus === 'skipped'
+          ? (chat.studioDetail ?? 'Too short for Studio')
+          : `Not sent to Studio: ${chat.studioDetail ?? 'it failed'}`
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-3 text-[13px]">
+      <span className={chat.studioStatus === 'failed' ? 'text-red-700' : 'text-ink-soft'}>
+        {text}
+        {about}
+      </span>
+      {(chat.studioStatus === 'failed' || chat.studioStatus === 'done') && chat.endedAt && (
+        <button onClick={() => void window.parla.studio.resend(chat.id)} className="btn-quiet !py-1 !text-[12.5px]">
+          {chat.studioStatus === 'failed' ? 'Try again' : 'Send again'}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -49,6 +82,7 @@ export default function ChatView({ chatId }: { chatId: string }): React.JSX.Elem
             chatId={chatId}
             durationS={chat?.endedAt ? (chat.endedAt - chat.startedAt) / 1000 : null}
           />
+          {chat && <StudioLine chat={chat} />}
           <div className="mt-6 mb-7 flex items-center gap-3">
             <span className="h-px flex-1 bg-ink/10" />
             <span className="block h-2.5 w-2.5 rotate-45 border border-ember" />
@@ -79,6 +113,7 @@ export default function ChatView({ chatId }: { chatId: string }): React.JSX.Elem
             <button
               onClick={() => {
                 if (persona) setActivePersonaId(persona.id)
+                useParlaStore.getState().setStudioProjectId(chat.studioProjectId)
                 void startSession()
               }}
               className="btn-quiet"

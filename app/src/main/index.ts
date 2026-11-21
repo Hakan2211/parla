@@ -3,10 +3,28 @@ import { join } from 'path'
 import { closeDb } from './db'
 import { registerIpc } from './ipc'
 import { ensureLocalModel, unloadParlaModels } from './local-llm'
-import { resolveLLMConfig, retryPendingExtractions } from './sessions'
+import { parseLaunchArgs, pushLaunchIntent, setLaunchWindow } from './launch'
+import { resolveLLMConfig, retryPendingExtractions, wireStudio } from './sessions'
 import { VoiceServer } from './voice-server'
 
+// One Parla. A second start (Studio's "Talk it through", the Desktop icon)
+// hands its arguments to the running window and exits right away, before it
+// opens the database or touches the voice server.
+const primary = app.requestSingleInstanceLock()
+if (!primary) app.exit(0)
+
 const voiceServer = new VoiceServer()
+pushLaunchIntent(parseLaunchArgs(process.argv))
+
+app.on('second-instance', (_e, argv) => {
+  pushLaunchIntent(parseLaunchArgs(argv))
+  const win = BrowserWindow.getAllWindows()[0]
+  if (win) {
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+})
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -48,14 +66,17 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  if (!primary) return
   // Mic access: grant media requests from our own renderer.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === 'media')
   })
 
   registerIpc(voiceServer)
+  wireStudio(voiceServer)
 
   const win = createWindow()
+  setLaunchWindow(win)
   let retriedExtractions = false
   voiceServer.onStatus((status) => {
     if (!win.isDestroyed()) win.webContents.send('voice:status-changed', status)

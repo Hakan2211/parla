@@ -5,6 +5,7 @@ import LatencyHUD from './LatencyHUD'
 import ModelSwitch from './ModelSwitch'
 import OrbStage from './OrbStage'
 import PersonaPicker from './PersonaPicker'
+import StudioPicker from './StudioPicker'
 import { DiamondRule, Icon } from './ui'
 import { CostPill } from './Usage'
 
@@ -156,6 +157,7 @@ export default function SessionView(): React.JSX.Element {
         ) : (
           <div className="mt-6 flex flex-col items-center gap-5">
             <PersonaPicker />
+            <StudioPicker />
             <ModelSwitch />
             <button
               onClick={() => void startSession()}

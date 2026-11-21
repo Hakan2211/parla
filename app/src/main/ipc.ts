@@ -4,7 +4,9 @@
 import { ipcMain } from 'electron'
 import type { MemoryEntry, Persona, TurnMetrics, UsageDelta } from '@shared/types'
 import { chatsRepo, memoryRepo, messagesRepo, personasRepo, settingsRepo } from './db/repos'
-import { endSession, resolveLLMConfig, startSession } from './sessions'
+import { takeLaunchIntent } from './launch'
+import { endSession, resolveLLMConfig, startSession, type StartOptions } from './sessions'
+import { parseToken, sendToStudio, studioProjects, studioTest } from './studio'
 import { ensureLocalModel, localStatus } from './local-llm'
 import { chatUsage, openRouterKeyInfo, recordUsage, usageSummary } from './usage'
 import type { VoiceServer } from './voice-server'
@@ -13,11 +15,22 @@ export function registerIpc(voiceServer: VoiceServer): void {
   ipcMain.handle('voice:status', () => voiceServer.current)
   ipcMain.handle('voice:restart', () => voiceServer.restart())
 
-  ipcMain.handle('session:start', (e, personaId: string | null) =>
-    startSession(voiceServer, personaId ?? null, (text) => {
-      if (!e.sender.isDestroyed()) e.sender.send('session:progress', text)
-    })
+  ipcMain.handle('session:start', (e, personaId: string | null, opts?: StartOptions) =>
+    startSession(
+      voiceServer,
+      personaId ?? null,
+      (text) => {
+        if (!e.sender.isDestroyed()) e.sender.send('session:progress', text)
+      },
+      opts ?? {}
+    )
   )
+
+  ipcMain.handle('launch:take', () => takeLaunchIntent())
+
+  ipcMain.handle('studio:test', () => studioTest())
+  ipcMain.handle('studio:projects', () => studioProjects())
+  ipcMain.handle('studio:resend', (_e, chatId: string) => sendToStudio(chatId))
 
   // Short voice sample for the voice pickers (bytes → renderer plays a blob).
   ipcMain.handle('voice:preview', async (_e, voiceId: string, text?: string) => {
@@ -113,7 +126,11 @@ export function registerIpc(voiceServer: VoiceServer): void {
       all[`llm.${provider}.hasKey`] = Boolean(all[`llm.${provider}.apiKey`])
       delete all[`llm.${provider}.apiKey`]
     }
+    all['studio.hasToken'] = Boolean(all['studio.token'])
+    delete all['studio.token']
     return all
   })
-  ipcMain.handle('settings:set', (_e, key: string, value: unknown) => settingsRepo.set(key, value))
+  ipcMain.handle('settings:set', (_e, key: string, value: unknown) =>
+    settingsRepo.set(key, key === 'studio.token' ? parseToken(String(value ?? '')) : value)
+  )
 }

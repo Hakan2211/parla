@@ -2,7 +2,11 @@
 # The app itself finds-or-spawns the Python voice server (app/src/main/voice-server.ts),
 # so nothing else has to be started here.
 # Runs hidden via scripts/parla-launch.vbs; all output goes to the log below.
+# Arguments (--studio-project <id>, --open-chat <id>) are passed to Electron; if
+# Parla is already running, a second Electron hands them to the open window
+# and exits (single-instance lock in app/src/main/index.ts).
 $ErrorActionPreference = 'Stop'
+$passArgs = @($args | Where-Object { $_ -match '^[A-Za-z0-9_=-]+$' })
 
 $root = Split-Path -Parent $PSScriptRoot
 $app = Join-Path $root 'app'
@@ -25,14 +29,20 @@ function Fail($msg) {
     exit 1
 }
 
-Log "--- launch ---"
+Log "--- launch --- $($passArgs -join ' ')"
 
 if (-not (Test-Path $electron)) { Fail "Electron is not installed. Run: cd $app; npm install" }
 
 # Already running? Don't start a second copy.
 $running = @(Get-Process -Name electron -ErrorAction SilentlyContinue |
     Where-Object { try { $_.Path -eq $electron } catch { $false } })
-if ($running.Count -gt 0) { Log "already running (pid $($running[0].Id)) - nothing to do"; exit 0 }
+if ($running.Count -gt 0) {
+    if ($passArgs.Count -eq 0) { Log "already running (pid $($running[0].Id)) - nothing to do"; exit 0 }
+    # No rebuild while it runs: just hand the arguments to the open window.
+    Start-Process -FilePath $electron -ArgumentList (@('.') + $passArgs) -WorkingDirectory $app | Out-Null
+    Log "already running (pid $($running[0].Id)) - passed $($passArgs -join ' ')"
+    exit 0
+}
 
 # Rebuild only when something under app/src (or the build config) is newer than the output.
 $stale = $true
@@ -60,7 +70,7 @@ if ($stale) {
     Log "build up to date"
 }
 
-$proc = Start-Process -FilePath $electron -ArgumentList '.' -WorkingDirectory $app -PassThru `
+$proc = Start-Process -FilePath $electron -ArgumentList (@('.') + $passArgs) -WorkingDirectory $app -PassThru `
     -RedirectStandardOutput (Join-Path $logDir 'electron.log') `
     -RedirectStandardError (Join-Path $logDir 'electron.err.log')
 Log "started electron (pid $($proc.Id))"

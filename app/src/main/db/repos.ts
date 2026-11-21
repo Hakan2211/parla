@@ -7,6 +7,7 @@ import type {
   MemoryKind,
   Message,
   Persona,
+  StudioStatus,
   TurnMetrics,
   UsageTotals
 } from '@shared/types'
@@ -25,6 +26,10 @@ interface ChatRow {
   ended_at: number | null
   extraction_status: Chat['extractionStatus']
   cost_usd: number | null
+  studio_project_id: string | null
+  studio_status: StudioStatus
+  studio_sent: number
+  studio_detail: string | null
 }
 
 // Chats always come with their summed cost attached.
@@ -43,19 +48,52 @@ function toChat(r: ChatRow): Chat {
     startedAt: r.started_at,
     endedAt: r.ended_at,
     extractionStatus: r.extraction_status,
-    costUsd: r.cost_usd ?? 0
+    costUsd: r.cost_usd ?? 0,
+    studioProjectId: r.studio_project_id,
+    studioStatus: r.studio_status,
+    studioSent: r.studio_sent,
+    studioDetail: r.studio_detail
   }
 }
 
 export const chatsRepo = {
-  create(input: { id: string; personaId: string | null; provider: string; model: string }): Chat {
+  create(input: {
+    id: string
+    personaId: string | null
+    provider: string
+    model: string
+    studioProjectId?: string | null
+  }): Chat {
     getDb()
       .prepare(
-        `INSERT INTO chats (id, persona_id, provider, model, started_at, extraction_status)
-         VALUES (?, ?, ?, ?, ?, 'pending')`
+        `INSERT INTO chats (id, persona_id, provider, model, started_at, extraction_status, studio_project_id)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?)`
       )
-      .run(input.id, input.personaId, input.provider, input.model, Date.now())
+      .run(input.id, input.personaId, input.provider, input.model, Date.now(), input.studioProjectId ?? null)
     return this.get(input.id)!
+  },
+
+  setStudio(id: string, status: StudioStatus, sent?: number, detail?: string | null): void {
+    getDb()
+      .prepare(
+        `UPDATE chats SET studio_status = ?, studio_sent = COALESCE(?, studio_sent), studio_detail = ?
+         WHERE id = ?`
+      )
+      .run(status, sent ?? null, detail ?? null, id)
+  },
+
+  /** Ended chats whose proposals still have to reach Studio (newest first, last 14 days). */
+  listPendingStudio(): Chat[] {
+    return (
+      getDb()
+        .prepare(
+          `${CHAT_SELECT}
+           WHERE c.ended_at IS NOT NULL AND c.studio_status IN ('pending','failed')
+             AND c.started_at > ?
+           ORDER BY c.started_at DESC LIMIT 10`
+        )
+        .all(Date.now() - 14 * 86_400_000) as ChatRow[]
+    ).map(toChat)
   },
 
   get(id: string): Chat | null {

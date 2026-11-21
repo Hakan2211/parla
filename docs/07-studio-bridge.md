@@ -2,7 +2,14 @@
 
 Studio (`D:\Studio`) is the research → brief → script → article app. Voice belongs here in Parla, not in Studio, so the two connect: talk an idea through in Parla, and the useful parts land in Studio as proposals.
 
-Studio side: `D:\Studio\docs\PLAN.md`, slice S10.
+Studio side: `D:\Studio\docs\PLAN.md`, slice S10. Parla side: slice S13, shipped 2026-11-21.
+
+## As built
+
+- **Code:** `app/src/main/studio.ts` (MCP client, context, send), `app/src/main/launch.ts` (flags), `voice/src/parla_voice/studio_extraction.py` (`POST /extract/studio`), migration 005 (Producer persona and `chats.studio_*`).
+- **Connect once:** in Studio, open Settings › Engines › Parla and click **Copy for Parla**. Then paste it into Parla › Settings › Studio and click **Test**.
+- **Launching:** `scripts/parla-launch.vbs --studio-project <id>` or `--open-chat <id>`. A second start hands its arguments to the running window, which uses the single-instance lock.
+- **Who goes to Studio:** a conversation with a Studio project, or any conversation with the Producer, once it ends. It goes after the memory extraction. A failed send is retried at the next start and when Test succeeds.
 
 ## Rule
 

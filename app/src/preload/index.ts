@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   Chat,
+  LaunchIntent,
   MemoryEntry,
   Message,
   Persona,
   SessionStartResult,
+  StudioProject,
   LocalStatus,
   OpenRouterKeyInfo,
   TurnMetrics,
@@ -27,14 +29,29 @@ const api = {
     }
   },
   session: {
-    start: (personaId: string | null): Promise<SessionStartResult> =>
-      ipcRenderer.invoke('session:start', personaId),
+    start: (
+      personaId: string | null,
+      opts?: { studioProjectId?: string | null }
+    ): Promise<SessionStartResult> => ipcRenderer.invoke('session:start', personaId, opts),
     end: (chatId: string): Promise<void> => ipcRenderer.invoke('session:end', chatId),
     onProgress: (fn: (text: string) => void): (() => void) => {
       const listener = (_e: Electron.IpcRendererEvent, text: string): void => fn(text)
       ipcRenderer.on('session:progress', listener)
       return () => ipcRenderer.removeListener('session:progress', listener)
     }
+  },
+  launch: {
+    take: (): Promise<LaunchIntent | null> => ipcRenderer.invoke('launch:take'),
+    onIntent: (fn: () => void): (() => void) => {
+      const listener = (): void => fn()
+      ipcRenderer.on('launch:intent', listener)
+      return () => ipcRenderer.removeListener('launch:intent', listener)
+    }
+  },
+  studio: {
+    test: (): Promise<{ ok: boolean; detail: string }> => ipcRenderer.invoke('studio:test'),
+    projects: (): Promise<StudioProject[]> => ipcRenderer.invoke('studio:projects'),
+    resend: (chatId: string): Promise<void> => ipcRenderer.invoke('studio:resend', chatId)
   },
   local: {
     status: (): Promise<LocalStatus> => ipcRenderer.invoke('local:status'),

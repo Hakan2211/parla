@@ -99,6 +99,20 @@ const MIGRATIONS: string[] = [
   UPDATE personas SET color = '#d9825f' WHERE id = 'builtin-friend' AND color = '#7c5cff';
   UPDATE personas SET color = '#8fa67f' WHERE id = 'builtin-coach' AND color = '#f59e0b';
   UPDATE personas SET color = '#7f78b8' WHERE id = 'builtin-thinker' AND color = '#10b981';
+  `,
+  // 005 — Studio bridge (docs/07-studio-bridge.md): the Producer persona, and
+  // per chat the Studio project it was about plus the state of sending its
+  // proposals to Studio ('none' = not a Studio conversation).
+  `
+  INSERT OR IGNORE INTO personas (id, name, system_prompt, voice_id, color, is_builtin, created_at, updated_at) VALUES
+  ('builtin-producer', 'The Producer',
+   'You are Parla in producer mode: you interview the user about a piece of content they are making, a video or an article. You are having a spoken conversation: keep responses short, one or two sentences, and ask one question at a time. Your job is to get the piece sharp: the angle that makes it different, who exactly it is for, the one claim it argues, the strongest example, what is still unclear, and what needs researching. Be direct and push for specifics: when an answer is vague, ask for the concrete case, the number, the name. Do not lecture or write the piece for them; draw it out of them. Never use markdown, lists, or emoji; you are speaking out loud.',
+   'bm_george', '#b0894f', 1, 1700000000003, 1700000000003);
+
+  ALTER TABLE chats ADD COLUMN studio_project_id TEXT;
+  ALTER TABLE chats ADD COLUMN studio_status TEXT NOT NULL DEFAULT 'none';
+  ALTER TABLE chats ADD COLUMN studio_sent INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE chats ADD COLUMN studio_detail TEXT;
   `
 ]
 

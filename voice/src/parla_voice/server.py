@@ -15,6 +15,7 @@ from loguru import logger
 from parla_voice import __version__
 from parla_voice.config import LLMConfig, SessionConfig
 from parla_voice.extraction import ExtractRequest
+from parla_voice.studio_extraction import StudioExtractRequest
 
 # Session configs parked between POST /sessions and the WS connect.
 # A config not claimed within this window is dropped.
@@ -122,6 +123,17 @@ def create_app() -> FastAPI:
             result = await extract(req)
         except Exception as e:
             logger.exception("extraction failed")
+            raise HTTPException(status_code=502, detail=str(e))
+        return result.model_dump()
+
+    @app.post("/extract/studio")
+    async def extract_studio_route(req: "StudioExtractRequest"):
+        from parla_voice.studio_extraction import extract_for_studio
+
+        try:
+            result = await extract_for_studio(req)
+        except Exception as e:
+            logger.exception("studio extraction failed")
             raise HTTPException(status_code=502, detail=str(e))
         return result.model_dump()
 

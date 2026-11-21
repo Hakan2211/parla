@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { LLMProvider, LocalStatus } from '@shared/types'
 import { CLAUDE_MODELS, modelSetting, tierOf } from '@/lib/models'
-import { Icon, Segmented, VOICES, VoiceAvatar, useVoicePreview } from './ui'
+import { useParlaStore } from '@/state/store'
+import { Icon, Segmented, Toggle, VOICES, VoiceAvatar, useVoicePreview } from './ui'
 import { UsagePanel } from './Usage'
 import { openMic } from '@/voice/client'
 
@@ -17,6 +18,9 @@ interface SettingsState {
   'llm.anthropic.effort': 'low' | 'medium' | 'high'
   'tts.engine': 'kokoro' | 'fish'
   'audio.inputDeviceId': string
+  'studio.enabled': boolean
+  'studio.url': string
+  'studio.token': string
 }
 
 const DEFAULTS: SettingsState = {
@@ -30,7 +34,10 @@ const DEFAULTS: SettingsState = {
   'llm.anthropic.model': 'claude-opus-5-5',
   'llm.anthropic.effort': 'low',
   'tts.engine': 'kokoro',
-  'audio.inputDeviceId': ''
+  'audio.inputDeviceId': '',
+  'studio.enabled': true,
+  'studio.url': '',
+  'studio.token': ''
 }
 
 
@@ -239,6 +246,84 @@ function ModelPicker({
         <p className="mt-2 text-[12px] text-ink-soft">
           Currently using a custom model: <span className="font-mono">{value}</span>
         </p>
+      )}
+    </div>
+  )
+}
+
+/** Studio connection: Studio's MCP endpoint and its token (Studio › Settings). */
+function StudioSettings({
+  settings,
+  update,
+  hasToken,
+  setHasToken
+}: {
+  settings: SettingsState
+  update: <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => void
+  hasToken: boolean
+  setHasToken: (v: boolean) => void
+}): React.JSX.Element {
+  const [check, setCheck] = useState<{ ok: boolean; detail: string } | 'checking' | null>(null)
+  const refreshProjects = useParlaStore((s) => s.refreshStudioProjects)
+  const test = (): void => {
+    setCheck('checking')
+    void window.parla.studio.test().then((r) => {
+      setCheck(r)
+      void refreshProjects()
+    })
+  }
+  return (
+    <div className="card space-y-4 px-6 py-5">
+      <div className="flex items-start justify-between gap-6">
+        <p className="text-[13.5px] leading-relaxed text-ink-soft">
+          Talk a video or article through with the Producer, and what comes out of it (ideas, the
+          angle, key points, open questions, your best lines) lands in Studio’s Inbox to accept or
+          reject. Studio is only asked before a conversation (the project’s brief) and after it,
+          never while you talk.
+        </p>
+        <Toggle
+          checked={settings['studio.enabled']}
+          onChange={(v) => {
+            update('studio.enabled', v)
+            setCheck(null)
+            setTimeout(() => void refreshProjects(), 50)
+          }}
+          label="Connect to Studio"
+        />
+      </div>
+      {settings['studio.enabled'] && (
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            <Field
+              label="Token (from Studio › Settings)"
+              type="password"
+              placeholder={hasToken ? '•••••••• saved — paste to replace' : 'Paste the token or the whole claude mcp add command'}
+              value={settings['studio.token']}
+              onChange={(v) => {
+                update('studio.token', v)
+                setHasToken(v.trim() !== '')
+                setCheck(null)
+              }}
+            />
+            <Field
+              label="Address"
+              placeholder="http://127.0.0.1:47825/mcp"
+              value={settings['studio.url']}
+              onChange={(v) => {
+                update('studio.url', v)
+                setCheck(null)
+              }}
+            />
+          </div>
+          <div className="flex items-center gap-3 text-[13px]">
+            <button onClick={test} className="btn-quiet">
+              {check === 'checking' ? 'Testing…' : 'Test'}
+            </button>
+            {check && check !== 'checking' && (
+              <span className={check.ok ? 'text-emerald-700' : 'text-red-700'}>{check.detail}</span>
+            )}
+          </div>
+        </>
       )}
     </div>
   )
@@ -464,14 +549,17 @@ export default function SettingsPage(): React.JSX.Element {
   const [saved, setSaved] = useState(false)
   const [hasStoredKey, setHasStoredKey] = useState(false)
   const [hasAnthropicKey, setHasAnthropicKey] = useState(false)
+  const [hasStudioToken, setHasStudioToken] = useState(false)
   const [check, setCheck] = useState<{ ok: boolean; detail: string } | 'checking' | null>(null)
 
   useEffect(() => {
     void window.parla.settings.all().then((all) => {
       setHasStoredKey(Boolean(all['llm.openrouter.hasKey']))
       setHasAnthropicKey(Boolean(all['llm.anthropic.hasKey']))
+      setHasStudioToken(Boolean(all['studio.hasToken']))
       delete all['llm.openrouter.hasKey']
       delete all['llm.anthropic.hasKey']
+      delete all['studio.hasToken']
       setSettings({ ...DEFAULTS, ...(all as Partial<SettingsState>) })
     })
   }, [])
@@ -645,6 +733,16 @@ export default function SettingsPage(): React.JSX.Element {
             <section className="mb-10">
               <SectionLabel>Microphone</SectionLabel>
               <MicPicker value={settings['audio.inputDeviceId']} onChange={(id) => update('audio.inputDeviceId', id)} />
+            </section>
+
+            <section className="mb-10">
+              <SectionLabel>Studio</SectionLabel>
+              <StudioSettings
+                settings={settings}
+                update={update}
+                hasToken={hasStudioToken}
+                setHasToken={setHasStudioToken}
+              />
             </section>
 
             <section>

@@ -10,6 +10,16 @@ import { chatsRepo, memoryRepo, messagesRepo, personasRepo, settingsRepo } from 
 import { ensureLocalModel, isLoading, LMSTUDIO_DEFAULT_URL, LOCAL_DEFAULT_MODEL } from './local-llm'
 import { refreshOpenRouterPrices } from './pricing'
 import { recordUsage } from './usage'
+import {
+  contextSection,
+  PRODUCER_ID,
+  projectContext,
+  retryPendingStudio,
+  sendToStudio,
+  setStudioRuntime,
+  studioReady,
+  wantsStudio
+} from './studio'
 import type { VoiceServer } from './voice-server'
 
 const DEFAULT_SYSTEM_PROMPT = `You are Parla, a warm, curious voice companion.
@@ -119,10 +129,16 @@ async function preflight(
   }
 }
 
+export interface StartOptions {
+  /** A Studio project to talk about (`--studio-project`, or the start screen's picker). */
+  studioProjectId?: string | null
+}
+
 export async function startSession(
   voiceServer: VoiceServer,
   personaId: string | null,
-  onProgress: (text: string) => void = () => {}
+  onProgress: (text: string) => void = () => {},
+  opts: StartOptions = {}
 ): Promise<SessionStartResult> {
   const base = voiceServer.baseUrl
   if (!base) throw new Error('voice server is not running')
@@ -134,14 +150,41 @@ export async function startSession(
   const systemPrompt = persona?.systemPrompt ?? DEFAULT_SYSTEM_PROMPT
   const brief = buildContextBrief()
 
+  // Studio: context before the session, never during it (docs/07-studio-bridge.md).
+  let studioProjectId = opts.studioProjectId || null
+  let studio = ''
+  let notice: string | undefined
+  let greeting = DEFAULT_GREETING
+  if (studioProjectId) {
+    if (!studioReady()) {
+      notice = 'Studio is off in Settings: talking without the project.'
+      studioProjectId = null
+    } else {
+      onProgress('Fetching the project from Studio…')
+      try {
+        const ctx = await projectContext(studioProjectId)
+        studio = contextSection(ctx)
+        greeting = `Let's work on “${ctx.title}”. Where do you want to start?`
+      } catch (e) {
+        // Still a Studio conversation: its proposals go to the Inbox later.
+        notice = `${e instanceof Error ? e.message : String(e)} Talking without the project's context.`
+      } finally {
+        onProgress('')
+      }
+    }
+  } else if (persona?.id === PRODUCER_ID) {
+    greeting = 'What are you making next?'
+  }
+  const prompt = [systemPrompt, studio, brief].filter(Boolean).join('\n\n')
+
   const chatId = randomUUID()
   const res = await fetch(`${base}/sessions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      system_prompt: brief ? `${systemPrompt}\n\n${brief}` : systemPrompt,
-      greeting: DEFAULT_GREETING,
+      system_prompt: prompt,
+      greeting,
       voice: { engine: settingsRepo.get('tts.engine', 'kokoro'), voice_id: persona?.voiceId ?? 'af_heart' },
       llm,
       stt: { engine: 'sherpa' },
@@ -156,17 +199,23 @@ export async function startSession(
     id: chatId,
     personaId: persona?.id ?? null,
     provider: llm.provider,
-    model: llm.model
+    model: llm.model,
+    studioProjectId
   })
-  return { chatId, sessionId: body.session_id, wsUrl: body.ws_url }
+  if (wantsStudio(persona?.id ?? null, studioProjectId)) chatsRepo.setStudio(chatId, 'pending')
+  return { chatId, sessionId: body.session_id, wsUrl: body.ws_url, notice }
 }
 
 export async function endSession(voiceServer: VoiceServer, chatId: string): Promise<void> {
   const chat = chatsRepo.get(chatId)
   if (!chat || chat.endedAt) return
   chatsRepo.end(chatId)
-  // Fire-and-forget: extraction must never block the UI.
-  void extractChat(voiceServer, chatId).catch(() => {})
+  // Fire-and-forget: extraction must never block the UI. Studio goes second,
+  // so its proposals carry the conversation's title.
+  void extractChat(voiceServer, chatId)
+    .catch(() => {})
+    .then(() => sendToStudio(chatId))
+    .catch(() => {})
 }
 
 interface ExtractResponse {
@@ -237,7 +286,12 @@ export async function extractChat(voiceServer: VoiceServer, chatId: string): Pro
 
 /** Retry chats whose extraction failed (or never ran) — called once at launch. */
 export function retryPendingExtractions(voiceServer: VoiceServer): void {
-  for (const chat of chatsRepo.listPendingExtraction()) {
-    void extractChat(voiceServer, chat.id).catch(() => {})
-  }
+  const memory = chatsRepo.listPendingExtraction().map((chat) => extractChat(voiceServer, chat.id))
+  // Then whatever couldn't reach Studio before (Studio closed, voice worker down).
+  void Promise.allSettled(memory).then(() => retryPendingStudio())
+}
+
+/** Studio sends need the voice worker (extraction) and the LLM config; wired once at startup. */
+export function wireStudio(voiceServer: VoiceServer): void {
+  setStudioRuntime({ voiceServer, resolveLLM: resolveLLMConfig })
 }

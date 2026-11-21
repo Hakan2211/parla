@@ -34,6 +34,30 @@ export interface Chat {
   extractionStatus: 'pending' | 'done' | 'failed' | 'skipped'
   /** Sum of priced usage for this chat (conversation + extraction), USD. */
   costUsd: number
+  /** The Studio project the conversation was about, if any. */
+  studioProjectId: string | null
+  /** Sending proposals to Studio's Inbox. 'none': not a Studio conversation. */
+  studioStatus: StudioStatus
+  /** Proposals Studio took (skipped repeats not counted). */
+  studioSent: number
+  /** Why the last send failed or was skipped. */
+  studioDetail: string | null
+}
+
+export type StudioStatus = 'none' | 'pending' | 'done' | 'failed' | 'skipped'
+
+/** A Studio project as the session picker shows it. */
+export interface StudioProject {
+  id: string
+  title: string
+  status: string
+  format: string
+}
+
+/** What a launch asked for (`--studio-project <id>`, `--open-chat <id>`). */
+export interface LaunchIntent {
+  studioProject?: string
+  openChat?: string
 }
 
 export interface TurnMetrics {
@@ -78,6 +102,8 @@ export interface SessionStartResult {
   chatId: string
   sessionId: string
   wsUrl: string
+  /** Shown at the top of the session, e.g. "Studio isn't running …". */
+  notice?: string
 }
 
 /** Incremental usage reported by the voice worker (mirrors voice/events.py). */
