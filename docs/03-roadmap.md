@@ -50,6 +50,10 @@
 
 See [04-hardware-device.md](04-hardware-device.md). Starts only after Phase 1 proves the pipeline with real users.
 
+## Side track — Studio bridge
+
+Talk content ideas through with a Producer persona; extracted ideas, brief sections, research questions and quotes go to Studio as proposals. See [07-studio-bridge.md](07-studio-bridge.md).
+
 ## Sequencing rules
 
 1. Nothing ships without per-stage latency metrics attached.
